@@ -353,79 +353,172 @@ public class TxPlayer extends BaseInternalPlayer {
                 Log.d(TAG, playEventLog);
             }
 
-            // event 2019 应该是缓冲结束
-            if (event == TXLiveConstants.PLAY_EVT_VOD_LOADING_END || event == 2019) {
-                submitPlayerEvent(OnPlayerEventListener.PLAYER_EVENT_ON_BUFFERING_END, null);
-            }
+            // 处理播放事件
+            switch (event) {
+                case TXLiveConstants.PLAY_EVT_VOD_PLAY_PREPARED: // 准备完成事件
+                    PLog.d(TAG, "onPrepared...");
+                    updateStatus(STATE_PREPARED);
 
-            if (event == TXLiveConstants.PLAY_EVT_VOD_PLAY_PREPARED) {
-                PLog.d(TAG, "onPrepared...");
-                updateStatus(STATE_PREPARED);
+                    mVideoWidth = mMediaPlayer.getWidth();
+                    mVideoHeight = mMediaPlayer.getHeight();
 
-                mVideoWidth = mMediaPlayer.getWidth();
-                mVideoHeight = mMediaPlayer.getHeight();
+                    Bundle bundleResolution = BundlePool.obtain();
+                    bundleResolution.putInt(EventKey.INT_ARG1, mVideoWidth);
+                    bundleResolution.putInt(EventKey.INT_ARG2, mVideoHeight);
 
-                Bundle bundleResolution = BundlePool.obtain();
-                bundleResolution.putInt(EventKey.INT_ARG1, mVideoWidth);
-                bundleResolution.putInt(EventKey.INT_ARG2, mVideoHeight);
+                    submitPlayerEvent(OnPlayerEventListener.PLAYER_EVENT_ON_PREPARED, bundleResolution);
 
-                submitPlayerEvent(OnPlayerEventListener.PLAYER_EVENT_ON_PREPARED, bundleResolution);
+                    int seekToPosition = startSeekPos / 1000;
+                    if (seekToPosition > 0 && mMediaPlayer.getDuration() > 0) {
+                        mMediaPlayer.seek(seekToPosition);
+                        startSeekPos = 0;
+                    }
 
-                int seekToPosition = startSeekPos / 1000;  // mSeekWhenPrepared may be changed after seekTo() call
-                if (seekToPosition > 0 && mMediaPlayer.getDuration() > 0) {
-                    mMediaPlayer.seek(seekToPosition);
+                    // We don't know the video size yet, but should start anyway.
+                    // The video size might be reported to us later.
+                    PLog.d(TAG, "mTargetState = " + mTargetState);
+                    if (mTargetState == STATE_STARTED) {
+                        start();
+                    } else if (mTargetState == STATE_PAUSED) {
+                        pause();
+                    } else if (mTargetState == STATE_STOPPED || mTargetState == STATE_IDLE) {
+                        reset();
+                    }
+                    break;
+
+                case TXLiveConstants.PLAY_EVT_PLAY_BEGIN: // 播放开始事件
+                    PLog.d(TAG, "onRenderingStart...");
                     startSeekPos = 0;
-                }
+                    submitPlayerEvent(OnPlayerEventListener.PLAYER_EVENT_ON_VIDEO_RENDER_START, null);
+                    break;
 
-                // We don't know the video size yet, but should start anyway.
-                // The video size might be reported to us later.
-                PLog.d(TAG, "mTargetState = " + mTargetState);
-                if (mTargetState == STATE_STARTED) {
-                    start();
-                } else if (mTargetState == STATE_PAUSED) {
-                    pause();
-                } else if (mTargetState == STATE_STOPPED
-                        || mTargetState == STATE_IDLE) {
-                    reset();
-                }
+                case TXLiveConstants.PLAY_EVT_PLAY_PROGRESS: // 播放进度事件
+                    int progress = param.getInt(TXLiveConstants.EVT_PLAY_PROGRESS_MS);
+                    int duration = param.getInt(TXLiveConstants.EVT_PLAY_DURATION_MS);
+
+                    progressMs = progress;
+                    durationMs = duration;
+
+                    float bufferedPosition = mMediaPlayer.getBufferDuration();
+                    submitBufferingUpdate((int) (bufferedPosition * 1000f / durationMs * 100f), null);
+                    break;
+
+                case TXLiveConstants.PLAY_EVT_PLAY_END: // 播放结束事件
+                    updateStatus(STATE_PLAYBACK_COMPLETE);
+                    mTargetState = STATE_PLAYBACK_COMPLETE;
+                    submitPlayerEvent(OnPlayerEventListener.PLAYER_EVENT_ON_PLAY_COMPLETE, null);
+                    if (!isLooping()) {
+                        stop();
+                    }
+                    break;
+
+                case TXLiveConstants.PLAY_EVT_PLAY_LOADING: // 开始缓冲
+                    submitPlayerEvent(OnPlayerEventListener.PLAYER_EVENT_ON_BUFFERING_START, null);
+                    break;
+
+                case TXLiveConstants.PLAY_EVT_VOD_LOADING_END: // 缓冲结束
+                    submitPlayerEvent(OnPlayerEventListener.PLAYER_EVENT_ON_BUFFERING_END, null);
+                    break;
+
+                case /*TXLiveConstants.PLAY_EVT_SEEK_COMPLETE*/ 2019: // 寻道完成事件
+                    submitPlayerEvent(OnPlayerEventListener.PLAYER_EVENT_ON_SEEK_COMPLETE, null);
+                    break;
+
+                case TXLiveConstants.PLAY_EVT_RCV_FIRST_I_FRAME: // 收到首帧
+                    break;
+
+                case TXLiveConstants.PLAY_EVT_RCV_FIRST_AUDIO_FRAME: // 音频首帧渲染开始
+                    submitPlayerEvent(OnPlayerEventListener.PLAYER_EVENT_ON_AUDIO_RENDER_START, null);
+                    break;
+
+                case TXLiveConstants.PLAY_EVT_CHANGE_RESOLUTION: // 分辨率改变
+                    int width = param.getInt(TXLiveConstants.EVT_PARAM1, mVideoWidth);
+                    int height = param.getInt(TXLiveConstants.EVT_PARAM2, mVideoHeight);
+
+                    if (width != mVideoWidth || height != mVideoHeight) {
+                        mVideoWidth = width;
+                        mVideoHeight = height;
+
+                        Bundle bundle = BundlePool.obtain();
+                        bundle.putInt(EventKey.INT_ARG1, mVideoWidth);
+                        bundle.putInt(EventKey.INT_ARG2, mVideoHeight);
+                        submitPlayerEvent(OnPlayerEventListener.PLAYER_EVENT_ON_VIDEO_SIZE_CHANGE, bundle);
+                    }
+                    break;
+
+                case TXLiveConstants.PLAY_EVT_CHANGE_ROTATION: // 视频旋转改变
+                    // 提交视频旋转改变事件
+                    int rotation = param.getInt(TXLiveConstants.EVT_PARAM1, 0);
+                    Bundle bundle = BundlePool.obtain();
+                    bundle.putInt(EventKey.INT_DATA, rotation);
+                    submitPlayerEvent(OnPlayerEventListener.PLAYER_EVENT_ON_VIDEO_ROTATION_CHANGED, bundle);
+                    break;
+
+                case TXLiveConstants.PLAY_EVT_START_VIDEO_DECODER: // 开始视频解码
+                    submitPlayerEvent(OnPlayerEventListener.PLAYER_EVENT_ON_VIDEO_RENDER_START, null);
+                    break;
+
+                case TXLiveConstants.PLAY_EVT_GET_PLAYINFO_SUCC: // 获取播放信息成功
+                    // 播放信息获取成功，可以在这里处理相关逻辑
+                    PLog.d(TAG, "Play info retrieved successfully");
+                    break;
+
+                case TXLiveConstants.PLAY_EVT_STREAM_SWITCH_SUCC: // 流切换成功
+                    // 流切换成功事件，可以在这里处理相关逻辑
+                    PLog.d(TAG, "Stream switch successful");
+                    break;
+
+                case TXLiveConstants.PLAY_EVT_GET_METADATA: // 获取元数据
+                    PLog.d(TAG, "Metadata retrieved");
+                    break;
+
+                default:
+                    PLog.d(TAG, "Unhandled play event: " + event);
+                    break;
             }
 
-            if (event == TXLiveConstants.PLAY_EVT_PLAY_BEGIN) { //视频播放开始
-                PLog.d(TAG, "onRenderingStart...");
-                startSeekPos = 0;
-                submitPlayerEvent(OnPlayerEventListener.PLAYER_EVENT_ON_VIDEO_RENDER_START, null);
-            } else if (event == TXLiveConstants.PLAY_EVT_PLAY_PROGRESS) { //视频播放进度
-                // 播放进度, 单位是毫秒
-                int progress = param.getInt(TXLiveConstants.EVT_PLAY_PROGRESS_MS);
-                // 视频总长, 单位是毫秒
-                int duration = param.getInt(TXLiveConstants.EVT_PLAY_DURATION_MS);
+            // 处理错误事件
+            switch (event) {
+                case TXLiveConstants.PLAY_ERR_NET_DISCONNECT: // 网络断开
+                    submitErrorEvent(OnErrorEventListener.ERROR_EVENT_COMMON, null);
+                    break;
 
-                progressMs = progress;
-                durationMs = duration;
+                case TXLiveConstants.PLAY_ERR_FILE_NOT_FOUND: // 文件未找到
+                    submitErrorEvent(OnErrorEventListener.ERROR_EVENT_IO, null);
+                    break;
 
-                float mVideoBufferedPosition = mMediaPlayer.getBufferDuration();
-                submitBufferingUpdate((int) (mVideoBufferedPosition * 1000f / durationMs * 100f), null);
-            } else if (event == TXLiveConstants.PLAY_ERR_NET_DISCONNECT) {
-                submitErrorEvent(OnErrorEventListener.ERROR_EVENT_COMMON, null);
-            } else if (event == TXLiveConstants.PLAY_ERR_FILE_NOT_FOUND) {
-                submitErrorEvent(OnErrorEventListener.ERROR_EVENT_IO, null);
-            } else if (event == TXLiveConstants.PLAY_EVT_PLAY_LOADING) {
-                submitPlayerEvent(OnPlayerEventListener.PLAYER_EVENT_ON_BUFFERING_START, null);
-            } else if (event == TXLiveConstants.PLAY_EVT_PLAY_END) { //视频播放结束
-                updateStatus(STATE_PLAYBACK_COMPLETE);
-                mTargetState = STATE_PLAYBACK_COMPLETE;
-                submitPlayerEvent(OnPlayerEventListener.PLAYER_EVENT_ON_PLAY_COMPLETE, null);
-                if (!isLooping()) {
-                    stop();
-                }
-            } else if (event == TXLiveConstants.PLAY_EVT_RCV_FIRST_I_FRAME) {
-                //stopLoadingAnimation();
-            } else if (event == TXLiveConstants.PLAY_EVT_CHANGE_RESOLUTION) {
-            } else if (event == TXLiveConstants.PLAY_ERR_HLS_KEY) {//HLS 解密 key 获取失败
-                submitErrorEvent(OnErrorEventListener.ERROR_EVENT_MALFORMED, null);
-            } else if (event == TXLiveConstants.PLAY_WARNING_RECONNECT) {
-                //startLoadingAnimation();
-            } else if (event == TXLiveConstants.PLAY_EVT_CHANGE_ROTATION) {
+                case TXLiveConstants.PLAY_ERR_HLS_KEY: // HLS密钥错误
+                    submitErrorEvent(OnErrorEventListener.ERROR_EVENT_MALFORMED, null);
+                    break;
+
+                case TXLiveConstants.PLAY_ERR_GET_RTMP_ACC_URL_FAIL: // 获取RTMP地址失败
+                    submitErrorEvent(OnErrorEventListener.ERROR_EVENT_REMOTE, null);
+                    break;
+
+                case TXLiveConstants.PLAY_ERR_HEVC_DECODE_FAIL: // HEVC解码失败
+                    submitErrorEvent(OnErrorEventListener.ERROR_EVENT_UNSUPPORTED, null);
+                    break;
+
+                case TXLiveConstants.PLAY_ERR_GET_PLAYINFO_FAIL: // 获取播放信息失败
+                    submitErrorEvent(OnErrorEventListener.ERROR_EVENT_IO, null);
+                    break;
+
+                case TXLiveConstants.PLAY_ERR_STREAM_SWITCH_FAIL: // 流切换失败
+                    submitErrorEvent(OnErrorEventListener.ERROR_EVENT_REMOTE, null);
+                    break;
+            }
+
+            // 处理警告事件
+            switch (event) {
+                case TXLiveConstants.PLAY_WARNING_RECONNECT:
+                    // 网络重连警告
+                    PLog.w(TAG, "Network reconnect warning");
+                    break;
+
+                case TXLiveConstants.PLAY_WARNING_HW_ACCELERATION_FAIL:
+                    // 硬件加速失败警告
+                    PLog.w(TAG, "Hardware acceleration failed");
+                    break;
             }
         }
 
