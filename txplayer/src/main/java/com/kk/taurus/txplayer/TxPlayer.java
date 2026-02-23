@@ -93,7 +93,7 @@ public class TxPlayer extends BaseInternalPlayer {
                     setPlayerHeaders(headers);
                 }
                 // setAutoPlay 设置为 false，不会立刻开始播放，只会开始加载视频
-                mMediaPlayer.startVodPlay(data);
+                mMediaPlayer.startPlay(data);
             } else if (!TextUtils.isEmpty(assetsPath)) {
                 Log.e(TAG, "txplayer not support assets play, you can use raw play.");
             }

@@ -43,13 +43,13 @@ project.ext {
             ijksdkVersion = '0.8.8',
             exoplayersdkVersion = '2.18.3',
             aliyunSdkVersion = '5.4.6.0-full',
-            txSdkVersion = '10.9.0.13102',
+            txSdkVersion = '9.5.29040',
             appcompatVersion = '1.2.0',
 
             playerbaseIjkVersion = '342_088_012',
             playerbaseExoVersion = '342_2183_019',
             playerbaseAlyVersion = '342_5460_026',
-            playerbaseTxVersion = '342_1090_033',
+            playerbaseTxVersion = '342_952_033',
             playerbaseVersion = '3.4.2'
     ]
 

@@ -11,7 +11,6 @@ import com.kk.taurus.playerbase.config.PlayerLibrary;
 import com.kk.taurus.playerbase.entity.DecoderPlan;
 import com.kk.taurus.playerbase.log.PLog;
 import com.kk.taurus.playerbase.record.PlayRecordManager;
-import com.kk.taurus.txplayer.TxLicenseUtil;
 import com.kk.taurus.txplayer.TxPlayer;
 import com.xapp.jjh.logtools.config.XLogConfig;
 import com.xapp.jjh.logtools.logger.LogLevel;
@@ -70,12 +69,6 @@ public class App extends Application {
         PlayerConfig.addDecoderPlan(new DecoderPlan(PLAN_ID_ALY, AliyunPlayer.class.getName(), "AliyunPlayer"));
         PlayerConfig.addDecoderPlan(new DecoderPlan(PLAN_ID_TX, TxPlayer.class.getName(), "TxPlayer"));
         PlayerConfig.setDefaultPlanId(PLAN_ID_IJK);
-
-        // 获取到的 licence url
-        String licenceUrl = "https://license.vod2.myqcloud.com/license/v2/1251477695_1/v_cube.license";
-        // 获取到的 licence key
-        String licenceKey = "f19bc7940637e442e746b2509ce63484";
-        TxLicenseUtil.initLicence(this, licenceUrl, licenceKey);
 
         //use default NetworkEventProducer.
         PlayerConfig.setUseDefaultNetworkEventProducer(true);
