@@ -273,11 +273,9 @@ public class AliyunPlayer extends BaseInternalPlayer {
             bundle.putInt(EventKey.INT_DATA, msc);
             submitPlayerEvent(OnPlayerEventListener.PLAYER_EVENT_ON_SEEK_TO, bundle);
         } else {
-            // May be unable to seekTo during prepare, call SeekTo after prepared
-            if (available()) {
-                if (msc > 0) {
-                    startSeekPos = msc;
-                }
+            // seekTo may not work during preparation, call it after prepared
+            if (msc > 0) {
+                startSeekPos = msc;
             }
         }
     }

@@ -166,7 +166,7 @@ public class ExoMediaPlayer extends BaseInternalPlayer {
         com.google.android.exoplayer2.upstream.DataSource.Factory dataSourceFactory =
                 new DefaultDataSource.Factory(mAppContext,
                         new DefaultHttpDataSource.Factory().setUserAgent(userAgent).setTransferListener(mBandwidthMeter));
-        if (extra != null && extra.size() > 0 &&
+        if (extra != null && !extra.isEmpty() &&
                 ("http".equalsIgnoreCase(scheme) || "https".equalsIgnoreCase(scheme))) {
             dataSourceFactory = new DefaultHttpDataSource.Factory()
                     .setUserAgent(userAgent)
@@ -311,7 +311,6 @@ public class ExoMediaPlayer extends BaseInternalPlayer {
             start();
             seekTo(msc);
         } else {
-            // May be unable to seekTo during prepare, call SeekTo after prepared
             if (msc > 0) {
                 mStartPos = msc;
             }
@@ -354,7 +353,7 @@ public class ExoMediaPlayer extends BaseInternalPlayer {
             bundle.putInt(EventKey.INT_DATA, msc);
             submitPlayerEvent(OnPlayerEventListener.PLAYER_EVENT_ON_SEEK_TO, bundle);
         } else {
-            // May be unable to seekTo during prepare, call SeekTo after prepared
+            // seekTo may not work during preparation, call it after prepared
             if (msc > 0) {
                 mStartPos = msc;
             }

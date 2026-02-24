@@ -337,6 +337,11 @@ public class SysMediaPlayer extends BaseInternalPlayer {
             Bundle bundle = BundlePool.obtain();
             bundle.putInt(EventKey.INT_DATA, msc);
             submitPlayerEvent(OnPlayerEventListener.PLAYER_EVENT_ON_SEEK_TO, bundle);
+        } else {
+            // seekTo may not work during preparation, call it after prepared
+            if (msc > 0) {
+                startSeekPos = msc;
+            }
         }
     }
 

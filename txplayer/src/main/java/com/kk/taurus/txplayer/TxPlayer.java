@@ -197,6 +197,11 @@ public class TxPlayer extends BaseInternalPlayer {
             Bundle bundle = BundlePool.obtain();
             bundle.putInt(EventKey.INT_DATA, msc);
             submitPlayerEvent(OnPlayerEventListener.PLAYER_EVENT_ON_SEEK_TO, bundle);
+        } else {
+            // seekTo may not work during preparation, call it after prepared
+            if (msc > 0) {
+                startSeekPos = msc;
+            }
         }
     }
 
@@ -368,7 +373,7 @@ public class TxPlayer extends BaseInternalPlayer {
 
                     submitPlayerEvent(OnPlayerEventListener.PLAYER_EVENT_ON_PREPARED, bundleResolution);
 
-                    int seekToPosition = startSeekPos / 1000;
+                    int seekToPosition = startSeekPos / 1000;  // mSeekWhenPrepared may be changed after seekTo() call
                     if (seekToPosition > 0 && mMediaPlayer.getDuration() > 0) {
                         mMediaPlayer.seek(seekToPosition);
                         startSeekPos = 0;
