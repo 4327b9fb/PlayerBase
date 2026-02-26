@@ -138,6 +138,16 @@ public class SysMediaPlayer extends BaseInternalPlayer {
         return mMediaPlayer!=null;
     }
 
+    private void seekToPrecise(MediaPlayer mediaPlayer, int msc) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            // Android 8.0+: SEEK_CLOSEST - seeks to nearest exact frame (precise but slower)
+            mediaPlayer.seekTo(msc, MediaPlayer.SEEK_CLOSEST);
+        } else {
+            // Pre-Android 8.0: default seekTo (seeks to nearest keyframe)
+            mediaPlayer.seekTo(msc);
+        }
+    }
+
     @Override
     public void setDisplay(SurfaceHolder surfaceHolder) {
         try {
@@ -280,7 +290,7 @@ public class SysMediaPlayer extends BaseInternalPlayer {
     public void start(int msc) {
         if(getState()==STATE_PREPARED && msc > 0){
             start();
-            mMediaPlayer.seekTo(msc);
+            seekToPrecise(mMediaPlayer, msc);
         }else{
             if(available()){
                 if(msc > 0){
@@ -333,7 +343,7 @@ public class SysMediaPlayer extends BaseInternalPlayer {
                         || getState()== STATE_STARTED
                         || getState()== STATE_PAUSED
                         || getState()== STATE_PLAYBACK_COMPLETE)){
-            mMediaPlayer.seekTo(msc);
+            seekToPrecise(mMediaPlayer, msc);
             Bundle bundle = BundlePool.obtain();
             bundle.putInt(EventKey.INT_DATA, msc);
             submitPlayerEvent(OnPlayerEventListener.PLAYER_EVENT_ON_SEEK_TO, bundle);
@@ -416,8 +426,8 @@ public class SysMediaPlayer extends BaseInternalPlayer {
 
             int seekToPosition = startSeekPos;  // mSeekWhenPrepared may be changed after seekTo() call
             if (seekToPosition > 0 && mp.getDuration() > 0) {
-                //seek to start position
-                mMediaPlayer.seekTo(seekToPosition);
+                //seek to start position with precise seeking
+                seekToPrecise(mMediaPlayer, seekToPosition);
                 startSeekPos = 0;
             }
 
