@@ -142,37 +142,56 @@ public class AliyunPlayer extends BaseInternalPlayer {
         }
     }
 
-    // TODO: Optimization method
+    /**
+     * 设置播放器请求头
+     */
     private void setPlayerHeaders(HashMap<String, String> headers) {
+        if (headers == null || headers.isEmpty()) {
+            return;
+        }
+
         com.aliyun.player.nativeclass.PlayerConfig playerConfig = mMediaPlayer.getConfig();
         // 默认重试次数为2次，手动设置重试次数为0次
         playerConfig.mNetworkRetryCount = 0;
 
-        String referer = headers.get("Referer");
-        headers.remove("Referer");
-        if (referer == null) {
-            referer = headers.get("referer");
-            headers.remove("referer");
-        }
+        // 处理 Referer（不区分大小写）
+        String referer = removeHeaderIgnoreCase(headers, "Referer");
         if (!TextUtils.isEmpty(referer)) {
             playerConfig.mReferrer = referer;
         }
 
-        String userAgent = headers.get("User-Agent");
-        headers.remove("User-Agent");
-        if (userAgent == null) {
-            userAgent = headers.get("user-agent");
-            headers.remove("user-agent");
-        }
+        // 处理 User-Agent（不区分大小写）
+        String userAgent = removeHeaderIgnoreCase(headers, "User-Agent");
         if (!TextUtils.isEmpty(userAgent)) {
             playerConfig.mUserAgent = userAgent;
         }
 
-        String[] playerHeaders = assemblePlayerHeaders(headers);
-        if (playerHeaders != null) {
-            playerConfig.setCustomHeaders(playerHeaders);
+        // 设置剩余的自定义 headers
+        if (!headers.isEmpty()) {
+            String[] customHeaders = assemblePlayerHeaders(headers);
+            playerConfig.setCustomHeaders(customHeaders);
         }
+
         mMediaPlayer.setConfig(playerConfig);
+    }
+
+    /**
+     * 从 headers 中移除指定 key（不区分大小写）并返回其值
+     */
+    private String removeHeaderIgnoreCase(HashMap<String, String> headers, String key) {
+        // 先精确匹配
+        String value = headers.get(key);
+        if (value != null) {
+            headers.remove(key);
+            return value;
+        }
+        // 再遍历查找（处理任意大小写情况）
+        for (String k : headers.keySet()) {
+            if (k.equalsIgnoreCase(key)) {
+                return headers.remove(k);
+            }
+        }
+        return null;
     }
 
     private String[] assemblePlayerHeaders(HashMap<String, String> headers) {
@@ -441,9 +460,9 @@ public class AliyunPlayer extends BaseInternalPlayer {
             submitPlayerEvent(OnPlayerEventListener.PLAYER_EVENT_ON_BUFFERING_START, null);
         }
 
-        @Override
-        public void onLoadingProgress(int i, float v) {
-            submitBufferingUpdate(i, null);
+        public void onLoadingProgress(int percent, float netSpeed) {
+            // 加载进度。百分比和网速。
+            // 网速为预留字段，暂时为0
         }
 
         @Override
@@ -499,7 +518,7 @@ public class AliyunPlayer extends BaseInternalPlayer {
     IPlayer.OnStateChangedListener mStateChangedListener = new IPlayer.OnStateChangedListener() {
         @Override
         public void onStateChanged(int newState) {
-            PLog.d(TAG, "onStateChanged...");
+            PLog.d(TAG, "onStateChanged: " + newState);
             mPlayerState = newState;
             //submitPlayerEvent(OnPlayerEventListener.PLAYER_EVENT_ON_STATUS_CHANGE, null);
         }
@@ -544,13 +563,15 @@ public class AliyunPlayer extends BaseInternalPlayer {
                             PLog.d(TAG, "LoopingStart:");
                             break;
                         case BufferedPosition:
-                            PLog.d(TAG, "BufferedPosition:");
-                            long mVideoBufferedPosition = infoBean.getExtraValue();
-                            submitBufferingUpdate((int) ((float) mVideoBufferedPosition / getDuration() * 100f), null);
+                            long videoBufferedPosition = infoBean.getExtraValue();
+                            int duration = getDuration();
+                            int bufferPercentage = (int) ((float) videoBufferedPosition / duration * 100f);
+                            PLog.d(TAG, "BufferedPosition: " + videoBufferedPosition + ", bufferPercentage: " + bufferPercentage);
+                            submitBufferingUpdate(bufferPercentage, null);
                             break;
                         case CurrentPosition:
-                            PLog.d(TAG, "CurrentPosition:");
                             mCurrentPosition = infoBean.getExtraValue();
+                            PLog.d(TAG, "CurrentPosition: " + mCurrentPosition);
                             //submitPlayerEvent(OnPlayerEventListener.PLAYER_EVENT_ON_BUFFERING_END, null);
                             break;
                         case AutoPlayStart:
