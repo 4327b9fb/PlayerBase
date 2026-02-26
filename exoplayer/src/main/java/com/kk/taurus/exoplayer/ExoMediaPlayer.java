@@ -80,11 +80,12 @@ public class ExoMediaPlayer extends BaseInternalPlayer {
 
     private int mVideoWidth, mVideoHeight;
 
+    private int mTargetState = Integer.MAX_VALUE;
+
     private int mStartPos = -1;
 
     private boolean isPreparing = true;
     private boolean isBuffering = false;
-    private boolean isPendingSeek = false;
 
     private boolean lastReportedPlayWhenReady = false;
     private int lastReportedPlaybackState = Player.STATE_IDLE;
@@ -116,6 +117,7 @@ public class ExoMediaPlayer extends BaseInternalPlayer {
     @Override
     public void setDataSource(DataSource dataSource) {
         updateStatus(STATE_INITIALIZED);
+        mTargetState = Integer.MAX_VALUE;
         mInternalPlayer.addListener(mListener);
         String data = dataSource.getData();
         Uri uri = dataSource.getUri();
@@ -165,7 +167,9 @@ public class ExoMediaPlayer extends BaseInternalPlayer {
         //create DefaultDataSourceFactory
         com.google.android.exoplayer2.upstream.DataSource.Factory dataSourceFactory =
                 new DefaultDataSource.Factory(mAppContext,
-                        new DefaultHttpDataSource.Factory().setUserAgent(userAgent).setTransferListener(mBandwidthMeter));
+                        new DefaultHttpDataSource.Factory()
+                                .setUserAgent(userAgent)
+                                .setTransferListener(mBandwidthMeter));
         if (extra != null && !extra.isEmpty() &&
                 ("http".equalsIgnoreCase(scheme) || "https".equalsIgnoreCase(scheme))) {
             dataSourceFactory = new DefaultHttpDataSource.Factory()
@@ -173,7 +177,8 @@ public class ExoMediaPlayer extends BaseInternalPlayer {
                     .setConnectTimeoutMs(DefaultHttpDataSource.DEFAULT_CONNECT_TIMEOUT_MILLIS)
                     .setReadTimeoutMs(DefaultHttpDataSource.DEFAULT_READ_TIMEOUT_MILLIS)
                     .setAllowCrossProtocolRedirects(true)
-                    .setDefaultRequestProperties(extra);
+                    .setDefaultRequestProperties(extra)
+                    .setTransferListener(mBandwidthMeter);
         }
 
         // Prepare the player with the source.
@@ -210,8 +215,23 @@ public class ExoMediaPlayer extends BaseInternalPlayer {
 
     }
 
+    @C.ContentType
+    private int inferContentType(String fileName) {
+        fileName = fileName.toLowerCase();
+        if (fileName.contains(".mpd")) {
+            return C.CONTENT_TYPE_DASH;
+        } else if (fileName.contains(".m3u8")) {
+            return C.CONTENT_TYPE_HLS;
+        } else {
+            return C.CONTENT_TYPE_OTHER;
+        }
+    }
+
     private MediaSource getMediaSource(Uri uri, com.google.android.exoplayer2.upstream.DataSource.Factory dataSourceFactory) {
         int contentType = Util.inferContentType(uri);
+        if (contentType == C.CONTENT_TYPE_OTHER) {
+            contentType = inferContentType(uri.toString());
+        }
         MediaItem mediaItem = new MediaItem.Builder()
                 .setUri(uri)
                 .setMimeType(MimeTypes.APPLICATION_MPD)
@@ -232,36 +252,47 @@ public class ExoMediaPlayer extends BaseInternalPlayer {
 
     @Override
     public void setDisplay(SurfaceHolder surfaceHolder) {
-        mInternalPlayer.setVideoSurfaceHolder(surfaceHolder);
-        submitPlayerEvent(OnPlayerEventListener.PLAYER_EVENT_ON_SURFACE_HOLDER_UPDATE, null);
+        if (available()) {
+            mInternalPlayer.setVideoSurfaceHolder(surfaceHolder);
+            submitPlayerEvent(OnPlayerEventListener.PLAYER_EVENT_ON_SURFACE_HOLDER_UPDATE, null);
+        }
     }
 
     @Override
     public void setSurface(Surface surface) {
-        mInternalPlayer.setVideoSurface(surface);
-        submitPlayerEvent(OnPlayerEventListener.PLAYER_EVENT_ON_SURFACE_UPDATE, null);
+        if (available()) {
+            mInternalPlayer.setVideoSurface(surface);
+            submitPlayerEvent(OnPlayerEventListener.PLAYER_EVENT_ON_SURFACE_UPDATE, null);
+        }
     }
 
     @Override
     public void setVolume(float left, float right) {
-        mInternalPlayer.setVolume(left);
+        if (available()) {
+            mInternalPlayer.setVolume(left);
+        }
     }
 
     @Override
     public void setSpeed(float speed) {
-        PlaybackParameters parameters = new PlaybackParameters(speed, 1f);
-        mInternalPlayer.setPlaybackParameters(parameters);
+        if (available()) {
+            PlaybackParameters parameters = new PlaybackParameters(speed, 1f);
+            mInternalPlayer.setPlaybackParameters(parameters);
+        }
     }
 
     @Override
     public void setLooping(boolean looping) {
-        mInternalPlayer.setRepeatMode(looping ? Player.REPEAT_MODE_ALL : Player.REPEAT_MODE_OFF);
+        if (available()) {
+            mInternalPlayer.setRepeatMode(looping ? Player.REPEAT_MODE_ALL : Player.REPEAT_MODE_OFF);
+        }
     }
 
     @Override
     public boolean isPlaying() {
-        if (mInternalPlayer == null)
+        if (!available()) {
             return false;
+        }
         int state = mInternalPlayer.getPlaybackState();
         switch (state) {
             case Player.STATE_BUFFERING:
@@ -276,16 +307,25 @@ public class ExoMediaPlayer extends BaseInternalPlayer {
 
     @Override
     public int getCurrentPosition() {
+        if (!available()) {
+            return 0;
+        }
         return (int) mInternalPlayer.getCurrentPosition();
     }
 
     @Override
     public int getDuration() {
+        if (!available()) {
+            return 0;
+        }
         return (int) mInternalPlayer.getDuration();
     }
 
     @Override
     public int getAudioSessionId() {
+        if (!available()) {
+            return 0;
+        }
         return mInternalPlayer.getAudioSessionId();
     }
 
@@ -299,10 +339,34 @@ public class ExoMediaPlayer extends BaseInternalPlayer {
         return mVideoHeight;
     }
 
+    /**
+     * 获取缓冲百分比
+     * <p>
+     * ExoPlayer 没有类似 MediaPlayer.OnBufferingUpdateListener 的回调，
+     * 官方推荐通过定时器定期调用此方法获取缓冲进度。
+     * AVPlayer 的 TimerCounterProxy 会定期调用此方法更新进度。
+     *
+     * @return 缓冲百分比 (0-100)
+     */
+    @Override
+    public int getBufferPercentage() {
+        if (available()) {
+            return mInternalPlayer.getBufferedPercentage();
+        }
+        return super.getBufferPercentage();
+    }
+
+    private boolean available() {
+        return mInternalPlayer != null;
+    }
+
     @Override
     public void start() {
-        mInternalPlayer.setPlayWhenReady(true);
-        submitPlayerEvent(OnPlayerEventListener.PLAYER_EVENT_ON_START, null);
+        if (available()) {
+            mInternalPlayer.setPlayWhenReady(true);
+            mTargetState = STATE_STARTED;
+            submitPlayerEvent(OnPlayerEventListener.PLAYER_EVENT_ON_START, null);
+        }
     }
 
     @Override
@@ -321,30 +385,33 @@ public class ExoMediaPlayer extends BaseInternalPlayer {
     @Override
     public void pause() {
         int state = getState();
-        if (isInPlaybackState()
+        if (available()
                 && state != STATE_END
                 && state != STATE_ERROR
                 && state != STATE_IDLE
                 && state != STATE_INITIALIZED
                 && state != STATE_PAUSED
-                && state != STATE_STOPPED)
+                && state != STATE_STOPPED) {
             mInternalPlayer.setPlayWhenReady(false);
-        submitPlayerEvent(OnPlayerEventListener.PLAYER_EVENT_ON_PAUSE, null);
+            updateStatus(STATE_PAUSED);
+            submitPlayerEvent(OnPlayerEventListener.PLAYER_EVENT_ON_PAUSE, null);
+        }
+        mTargetState = STATE_PAUSED;
     }
 
     @Override
     public void resume() {
-        if (isInPlaybackState() && getState() == STATE_PAUSED)
+        if (available() && getState() == STATE_PAUSED) {
             mInternalPlayer.setPlayWhenReady(true);
-        submitPlayerEvent(OnPlayerEventListener.PLAYER_EVENT_ON_RESUME, null);
+            updateStatus(STATE_STARTED);
+            submitPlayerEvent(OnPlayerEventListener.PLAYER_EVENT_ON_RESUME, null);
+        }
+        mTargetState = STATE_STARTED;
     }
 
     @Override
     public void seekTo(int msc) {
-        if (isInPlaybackState()) {
-            isPendingSeek = true;
-        }
-        if ((getState() == STATE_PREPARED
+        if (available() && (getState() == STATE_PREPARED
                 || getState() == STATE_STARTED
                 || getState() == STATE_PAUSED
                 || getState() == STATE_PLAYBACK_COMPLETE)) {
@@ -362,36 +429,34 @@ public class ExoMediaPlayer extends BaseInternalPlayer {
 
     @Override
     public void stop() {
-        isPreparing = true;
-        isBuffering = false;
-        updateStatus(IPlayer.STATE_STOPPED);
-        mInternalPlayer.stop();
-        submitPlayerEvent(OnPlayerEventListener.PLAYER_EVENT_ON_STOP, null);
+        if (available()) {
+            isPreparing = true;
+            isBuffering = false;
+            updateStatus(IPlayer.STATE_STOPPED);
+            mInternalPlayer.stop();
+            mTargetState = STATE_STOPPED;
+            submitPlayerEvent(OnPlayerEventListener.PLAYER_EVENT_ON_STOP, null);
+        }
     }
 
     @Override
     public void reset() {
         stop();
         updateStatus(STATE_IDLE);
+        mTargetState = STATE_IDLE;
         submitPlayerEvent(OnPlayerEventListener.PLAYER_EVENT_ON_RESET, null);
     }
 
     @Override
     public void destroy() {
-        isPreparing = true;
-        isBuffering = false;
-        updateStatus(IPlayer.STATE_END);
-        mInternalPlayer.removeListener(mListener);
-        mInternalPlayer.release();
-        submitPlayerEvent(OnPlayerEventListener.PLAYER_EVENT_ON_DESTROY, null);
-    }
-
-    private boolean isInPlaybackState() {
-        int state = getState();
-        return state != STATE_END
-                && state != STATE_ERROR
-                && state != STATE_INITIALIZED
-                && state != STATE_STOPPED;
+        if (available()) {
+            isPreparing = true;
+            isBuffering = false;
+            updateStatus(IPlayer.STATE_END);
+            mInternalPlayer.removeListener(mListener);
+            mInternalPlayer.release();
+            submitPlayerEvent(OnPlayerEventListener.PLAYER_EVENT_ON_DESTROY, null);
+        }
     }
 
     private Player.Listener mListener = new Player.Listener() {
@@ -424,12 +489,17 @@ public class ExoMediaPlayer extends BaseInternalPlayer {
         }
 
         @Override
-        public void onIsLoadingChanged(boolean isLoading) {
-            int bufferPercentage = mInternalPlayer.getBufferedPercentage();
-            if (!isLoading) {
-                submitBufferingUpdate(bufferPercentage, null);
+        public void onPositionDiscontinuity(Player.PositionInfo oldPosition, Player.PositionInfo newPosition, int reason) {
+            // ExoPlayer seek completed callback
+            if (reason == Player.DISCONTINUITY_REASON_SEEK) {
+                PLog.d(TAG, "onPositionDiscontinuity: SEEK_COMPLETE");
+                submitPlayerEvent(OnPlayerEventListener.PLAYER_EVENT_ON_SEEK_COMPLETE, null);
             }
-            PLog.d(TAG, "onLoadingChanged : " + isLoading + ", bufferPercentage = " + bufferPercentage);
+        }
+
+        @Override
+        public void onIsLoadingChanged(boolean isLoading) {
+            PLog.d(TAG, "onIsLoadingChanged : " + isLoading);
         }
 
         @Override
@@ -442,6 +512,32 @@ public class ExoMediaPlayer extends BaseInternalPlayer {
             PLog.d(TAG, "onPlayerStateChanged : playWhenReady = " + playWhenReady + ", reason = " + reason);
 
             if (lastReportedPlayWhenReady != playWhenReady || lastReportedPlaybackState != reason) {
+
+                // 处理缓冲事件（不受 isPreparing 影响）
+                switch (reason) {
+                    case Player.STATE_BUFFERING:
+                        if (!isBuffering) {
+                            isBuffering = true;
+                            long bitrateEstimate = mBandwidthMeter.getBitrateEstimate();
+                            PLog.d(TAG, "buffer_start, BandWidth : " + bitrateEstimate);
+                            Bundle bundle = BundlePool.obtain();
+                            bundle.putLong(EventKey.LONG_DATA, bitrateEstimate);
+                            submitPlayerEvent(OnPlayerEventListener.PLAYER_EVENT_ON_BUFFERING_START, bundle);
+                        }
+                        break;
+                    case Player.STATE_READY:
+                    case Player.STATE_ENDED:
+                        if (isBuffering) {
+                            isBuffering = false;
+                            long bitrateEstimate = mBandwidthMeter.getBitrateEstimate();
+                            PLog.d(TAG, "buffer_end, BandWidth : " + bitrateEstimate);
+                            Bundle bundle = BundlePool.obtain();
+                            bundle.putLong(EventKey.LONG_DATA, bitrateEstimate);
+                            submitPlayerEvent(OnPlayerEventListener.PLAYER_EVENT_ON_BUFFERING_END, bundle);
+                        }
+                        break;
+                }
+
                 if (!isPreparing) {
                     if (playWhenReady) {
                         if (getState() == STATE_PREPARED) {
@@ -471,52 +567,35 @@ public class ExoMediaPlayer extends BaseInternalPlayer {
                             updateStatus(IPlayer.STATE_PREPARED);
                             submitPlayerEvent(OnPlayerEventListener.PLAYER_EVENT_ON_PREPARED, bundle);
 
-                            if (playWhenReady) {
-                                updateStatus(STATE_STARTED);
-                                submitPlayerEvent(OnPlayerEventListener.PLAYER_EVENT_ON_AUDIO_RENDER_START, null);
-                            }
-
                             if (mStartPos > 0 && mInternalPlayer.getDuration() > 0) {
                                 mInternalPlayer.seekTo(mStartPos);
                                 mStartPos = -1;
                             }
-                            break;
-                    }
-                }
 
-                if (isBuffering) {
-                    switch (reason) {
-                        case Player.STATE_READY:
-                        case Player.STATE_ENDED:
-                            long bitrateEstimate = mBandwidthMeter.getBitrateEstimate();
-                            PLog.d(TAG, "buffer_end, BandWidth : " + bitrateEstimate);
-                            isBuffering = false;
-                            Bundle bundle = BundlePool.obtain();
-                            bundle.putLong(EventKey.LONG_DATA, bitrateEstimate);
-                            submitPlayerEvent(OnPlayerEventListener.PLAYER_EVENT_ON_BUFFERING_END, bundle);
-                            break;
-                    }
-                }
-
-                if (isPendingSeek) {
-                    switch (reason) {
-                        case Player.STATE_READY:
-                            isPendingSeek = false;
-                            submitPlayerEvent(OnPlayerEventListener.PLAYER_EVENT_ON_SEEK_COMPLETE, null);
+                            // 根据目标状态执行相应操作
+                            PLog.d(TAG, "mTargetState = " + mTargetState);
+                            if (mTargetState == STATE_STARTED) {
+                                mInternalPlayer.setPlayWhenReady(true);
+                                updateStatus(STATE_STARTED);
+                                submitPlayerEvent(OnPlayerEventListener.PLAYER_EVENT_ON_AUDIO_RENDER_START, null);
+                            } else if (mTargetState == STATE_PAUSED) {
+                                mInternalPlayer.setPlayWhenReady(false);
+                                updateStatus(STATE_PAUSED);
+                                submitPlayerEvent(OnPlayerEventListener.PLAYER_EVENT_ON_PAUSE, null);
+                            } else if (mTargetState == STATE_STOPPED || mTargetState == STATE_IDLE) {
+                                reset();
+                            } else if (playWhenReady) {
+                                // mTargetState 未设置，但 playWhenReady 为 true，自动开始播放
+                                updateStatus(STATE_STARTED);
+                                submitPlayerEvent(OnPlayerEventListener.PLAYER_EVENT_ON_AUDIO_RENDER_START, null);
+                            }
+                            // else: mTargetState 未设置且 playWhenReady 为 false，保持 STATE_PREPARED
                             break;
                     }
                 }
 
                 if (!isPreparing) {
                     switch (reason) {
-                        case Player.STATE_BUFFERING:
-                            long bitrateEstimate = mBandwidthMeter.getBitrateEstimate();
-                            PLog.d(TAG, "buffer_start, BandWidth : " + bitrateEstimate);
-                            isBuffering = true;
-                            Bundle bundle = BundlePool.obtain();
-                            bundle.putLong(EventKey.LONG_DATA, bitrateEstimate);
-                            submitPlayerEvent(OnPlayerEventListener.PLAYER_EVENT_ON_BUFFERING_START, bundle);
-                            break;
                         case Player.STATE_ENDED:
                             updateStatus(IPlayer.STATE_PLAYBACK_COMPLETE);
                             submitPlayerEvent(OnPlayerEventListener.PLAYER_EVENT_ON_PLAY_COMPLETE, null);
@@ -538,17 +617,19 @@ public class ExoMediaPlayer extends BaseInternalPlayer {
         @Override
         public void onPlayerError(PlaybackException error) {
             updateStatus(IPlayer.STATE_ERROR);
-            if (error == null) {
-                submitErrorEvent(OnErrorEventListener.ERROR_EVENT_UNKNOWN, null);
-                return;
-            }
+            mTargetState = STATE_ERROR;
+
             String errorMessage = error.getMessage() == null ? "" : error.getMessage();
             Throwable cause = error.getCause();
             String causeMessage = cause != null ? cause.getMessage() : "";
             PLog.e(TAG, errorMessage + ", causeMessage = " + causeMessage);
+
             Bundle bundle = BundlePool.obtain();
             bundle.putString("errorMessage", errorMessage);
             bundle.putString("causeMessage", causeMessage);
+            bundle.putInt("errorCode", error.errorCode);
+
+            // Handle ExoPlaybackException (older API)
             if (error instanceof ExoPlaybackException) {
                 int type = ((ExoPlaybackException) error).type;
                 switch (type) {
@@ -564,18 +645,17 @@ public class ExoMediaPlayer extends BaseInternalPlayer {
                     case ExoPlaybackException.TYPE_REMOTE:
                         submitErrorEvent(OnErrorEventListener.ERROR_EVENT_REMOTE, bundle);
                         break;
-                    //Deprecated from exo core 2.13.0
-//                case ExoPlaybackException.TYPE_OUT_OF_MEMORY:
-//                    submitErrorEvent(OnErrorEventListener.ERROR_EVENT_OUT_OF_MEMORY, bundle);
-//                    break;
                     default:
                         submitErrorEvent(OnErrorEventListener.ERROR_EVENT_COMMON, bundle);
                         break;
                 }
                 return;
             }
-            int type = error.errorCode;
-            switch (type) {
+
+            // Handle PlaybackException with errorCode (newer API)
+            int errorCode = error.errorCode;
+            switch (errorCode) {
+                // IO errors
                 case PlaybackException.ERROR_CODE_IO_UNSPECIFIED:
                 case PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED:
                 case PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT:
@@ -587,23 +667,45 @@ public class ExoMediaPlayer extends BaseInternalPlayer {
                 case PlaybackException.ERROR_CODE_IO_READ_POSITION_OUT_OF_RANGE:
                     submitErrorEvent(OnErrorEventListener.ERROR_EVENT_IO, bundle);
                     break;
+
+                // Parsing errors
                 case PlaybackException.ERROR_CODE_PARSING_CONTAINER_MALFORMED:
                 case PlaybackException.ERROR_CODE_PARSING_MANIFEST_MALFORMED:
                     submitErrorEvent(OnErrorEventListener.ERROR_EVENT_MALFORMED, bundle);
                     break;
+
+                // Unsupported errors
                 case PlaybackException.ERROR_CODE_PARSING_CONTAINER_UNSUPPORTED:
                 case PlaybackException.ERROR_CODE_PARSING_MANIFEST_UNSUPPORTED:
+                case PlaybackException.ERROR_CODE_DECODING_FORMAT_UNSUPPORTED:
+                case PlaybackException.ERROR_CODE_AUDIO_TRACK_INIT_FAILED:
                     submitErrorEvent(OnErrorEventListener.ERROR_EVENT_UNSUPPORTED, bundle);
                     break;
-                case PlaybackException.ERROR_CODE_UNSPECIFIED:
-                    submitErrorEvent(OnErrorEventListener.ERROR_EVENT_UNKNOWN, bundle);
+
+                // Render/Decoder errors
+                case PlaybackException.ERROR_CODE_AUDIO_TRACK_WRITE_FAILED:
+                case PlaybackException.ERROR_CODE_DECODER_INIT_FAILED:
+                case PlaybackException.ERROR_CODE_DECODING_FAILED:
+                case PlaybackException.ERROR_CODE_DECODING_FORMAT_EXCEEDS_CAPABILITIES:
+                    submitErrorEvent(OnErrorEventListener.ERROR_EVENT_RENDER, bundle);
                     break;
-                case PlaybackException.ERROR_CODE_REMOTE_ERROR:
-                    submitErrorEvent(OnErrorEventListener.ERROR_EVENT_REMOTE, bundle);
-                    break;
+
+                // Timeout
                 case PlaybackException.ERROR_CODE_TIMEOUT:
                     submitErrorEvent(OnErrorEventListener.ERROR_EVENT_TIMED_OUT, bundle);
                     break;
+
+                // Remote
+                case PlaybackException.ERROR_CODE_REMOTE_ERROR:
+                    submitErrorEvent(OnErrorEventListener.ERROR_EVENT_REMOTE, bundle);
+                    break;
+
+                // Unspecified
+                case PlaybackException.ERROR_CODE_UNSPECIFIED:
+                    submitErrorEvent(OnErrorEventListener.ERROR_EVENT_UNKNOWN, bundle);
+                    break;
+
+                // Default: other unclassified errors
                 default:
                     submitErrorEvent(OnErrorEventListener.ERROR_EVENT_COMMON, bundle);
                     break;
@@ -615,5 +717,4 @@ public class ExoMediaPlayer extends BaseInternalPlayer {
             PLog.d(TAG, "onPlaybackParametersChanged : " + playbackParameters.toString());
         }
     };
-
 }
