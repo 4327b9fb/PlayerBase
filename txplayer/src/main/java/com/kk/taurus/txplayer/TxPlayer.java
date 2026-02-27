@@ -485,7 +485,7 @@ public class TxPlayer extends BaseInternalPlayer {
             // 处理错误事件
             switch (event) {
                 case TXLiveConstants.PLAY_ERR_NET_DISCONNECT: // 网络断开
-                    submitErrorEvent(OnErrorEventListener.ERROR_EVENT_COMMON, null);
+                    submitErrorEvent(OnErrorEventListener.ERROR_EVENT_IO, null);
                     break;
 
                 case TXLiveConstants.PLAY_ERR_FILE_NOT_FOUND: // 文件未找到
@@ -510,6 +510,11 @@ public class TxPlayer extends BaseInternalPlayer {
 
                 case TXLiveConstants.PLAY_ERR_STREAM_SWITCH_FAIL: // 流切换失败
                     submitErrorEvent(OnErrorEventListener.ERROR_EVENT_REMOTE, null);
+                    break;
+
+                default:
+                    // 其他未分类错误
+                    submitErrorEvent(OnErrorEventListener.ERROR_EVENT_COMMON, null);
                     break;
             }
 
