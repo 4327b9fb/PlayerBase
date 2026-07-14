@@ -234,7 +234,6 @@ public class ExoMediaPlayer extends BaseInternalPlayer {
         }
         MediaItem mediaItem = new MediaItem.Builder()
                 .setUri(uri)
-                .setMimeType(MimeTypes.APPLICATION_MPD)
                 .build();
         switch (contentType) {
             case C.CONTENT_TYPE_DASH:
