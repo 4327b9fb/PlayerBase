@@ -18,12 +18,15 @@ package com.kk.taurus.exoplayer;
 
 import static com.google.android.exoplayer2.util.Assertions.checkNotNull;
 
+import android.annotation.SuppressLint;
 import android.content.Context;
 import android.net.Uri;
 import android.os.Bundle;
 import android.text.TextUtils;
 import android.view.Surface;
 import android.view.SurfaceHolder;
+
+import androidx.annotation.Nullable;
 
 import com.google.android.exoplayer2.C;
 import com.google.android.exoplayer2.DefaultRenderersFactory;
@@ -184,13 +187,16 @@ public class ExoMediaPlayer extends BaseInternalPlayer {
         // Prepare the player with the source.
         isPreparing = true;
 
+        //get overrideExtension from extra data
+        String overrideExtension = extra != null ? extra.get(EXTRA_OVERRIDE_EXTENSION) : null;
+
         //create MediaSource
-        MediaSource mediaSource = getMediaSource(videoUri, dataSourceFactory);
+        MediaSource mediaSource = getMediaSource(videoUri, dataSourceFactory, overrideExtension);
 
         //handle timed text source
         TimedTextSource timedTextSource = dataSource.getTimedTextSource();
         if (timedTextSource != null) {
-            Format format = new Format.Builder().setSampleMimeType(timedTextSource.getMimeType()).setSelectionFlags(timedTextSource.getFlag()).build();
+            @SuppressLint("WrongConstant") Format format = new Format.Builder().setSampleMimeType(timedTextSource.getMimeType()).setSelectionFlags(timedTextSource.getFlag()).build();
             /*MediaSource timedTextMediaSource = new SingleSampleMediaSource.Factory(new DefaultDataSourceFactory(mAppContext,
                     userAgent)).createMediaSource(new MediaItem.Subtitle(
                     Uri.parse(timedTextSource.getPath()),
@@ -215,23 +221,34 @@ public class ExoMediaPlayer extends BaseInternalPlayer {
 
     }
 
-    @C.ContentType
-    private int inferContentType(String fileName) {
-        fileName = fileName.toLowerCase();
-        if (fileName.contains(".mpd")) {
-            return C.CONTENT_TYPE_DASH;
-        } else if (fileName.contains(".m3u8")) {
-            return C.CONTENT_TYPE_HLS;
-        } else {
-            return C.CONTENT_TYPE_OTHER;
-        }
-    }
+    /**
+     * Extra key for overriding content type inference via file extension (e.g. "mpd", "m3u8")
+     */
+    public static final String EXTRA_OVERRIDE_EXTENSION = "overrideExtension";
 
-    private MediaSource getMediaSource(Uri uri, com.google.android.exoplayer2.upstream.DataSource.Factory dataSourceFactory) {
+    @C.ContentType
+    private int inferContentType(Uri uri, @Nullable String overrideExtension) {
+        if (!TextUtils.isEmpty(overrideExtension)) {
+            return Util.inferContentTypeForExtension(overrideExtension);
+        }
         int contentType = Util.inferContentType(uri);
         if (contentType == C.CONTENT_TYPE_OTHER) {
-            contentType = inferContentType(uri.toString());
+            // Fallback: check full URI string for known extensions,
+            // this handles URLs where extension is not in the path segment
+            String uriString = uri.toString().toLowerCase();
+            if (uriString.contains(".mpd")) {
+                return C.CONTENT_TYPE_DASH;
+            } else if (uriString.contains(".m3u8")) {
+                return C.CONTENT_TYPE_HLS;
+            } else if (uriString.contains(".ism") || uriString.contains(".isml")) {
+                return C.CONTENT_TYPE_SS;
+            }
         }
+        return contentType;
+    }
+
+    private MediaSource getMediaSource(Uri uri, com.google.android.exoplayer2.upstream.DataSource.Factory dataSourceFactory, @Nullable String overrideExtension) {
+        int contentType = inferContentType(uri, overrideExtension);
         MediaItem mediaItem = new MediaItem.Builder()
                 .setUri(uri)
                 .build();
